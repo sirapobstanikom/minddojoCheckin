@@ -1,0 +1,21 @@
+/* Theme variables for yellow/black/white palette with accents */
+:root {
+  --color-yellow: #fed201;
+  --color-yellow-100: #ffe7a8;
+  --color-yellow-200: rgba(254,210,1,0.18);
+  --color-yellow-300: rgba(254,210,1,0.9);
+
+  --color-dark: #111111;
+  --color-dark-80: rgba(17,17,17,0.8);
+  --color-dark-30: rgba(17,17,17,0.3);
+
+  --color-surface: #fffef8;
+  --color-surface-2: #ffffff;
+
+  --muted: #666666;
+  --success: #0f5132;
+  --danger: #721c24;
+
+  --shadow-sm: 0 4px 12px rgba(17,17,17,0.06);
+  --shadow-md: 0 8px 25px rgba(17,17,17,0.08);
+}
