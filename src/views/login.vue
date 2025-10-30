@@ -33,6 +33,7 @@
 import { reactive, computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../stores/auth'
+import { AuthApi } from '../api/client'
 
 const router = useRouter && useRouter()
 const auth = useAuth()
@@ -61,35 +62,18 @@ function hasValidationErrors() {
 }
 
 async function onSubmit() {
-	serverError.value = ''
-	if (hasValidationErrors()) return
-
-	loading.value = true
-	try {
-		// Mock authentication delay
-		await new Promise((res) => setTimeout(res, 700))
-
-				// Mock auth logic: accept admin@example.com / password (admin)
-				// and user@example.com / password (regular user)
-				if ((form.email === 'admin@example.com' || form.email === 'user@example.com') && form.password === 'password') {
-					const role = form.email === 'admin@example.com' ? 'admin' : 'user'
-					const displayName = form.email === 'admin@example.com' ? 'Administrator' : 'Normal User'
-					auth.setUser({ email: form.email, name: displayName, role }, 'fake-jwt-token')
-					// navigate to dashboard or root
-					try {
-						router && router.push({ path: '/' })
-					} catch (err) {
-						router && router.push('/')
-					}
-				} else {
-					serverError.value = 'Invalid email or password.'
-				}
-	} catch (err) {
-		serverError.value = 'Unexpected error. Please try again.'
-		// console.error(err)
-	} finally {
-		loading.value = false
-	}
+    serverError.value = ''
+    if (hasValidationErrors()) return
+    loading.value = true
+    try {
+        const { token, user } = await AuthApi.login(form.email, form.password)
+        auth.setUser({ email: user.email, name: user.name, role: user.role }, token)
+        try { router && router.push({ path: '/' }) } catch { router && router.push('/') }
+    } catch (err) {
+        serverError.value = err?.message || 'Unexpected error. Please try again.'
+    } finally {
+        loading.value = false
+    }
 }
 </script>
 

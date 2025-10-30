@@ -139,6 +139,7 @@
 <script>
 import { ref, computed, onMounted } from 'vue'
 import { useAuth } from '../stores/auth'
+import { LeaveApi } from '../api/client'
 
 export default {
   name: 'LeaveRequest',
@@ -154,47 +155,7 @@ export default {
 
     const selectedStatus = ref('')
     
-    const leaveRequests = ref([
-      {
-        id: 1,
-        type: 'sick',
-        startDate: '2024-01-15',
-        endDate: '2024-01-16',
-        reason: 'ป่วยไข้หวัดใหญ่',
-        contact: '081-234-5678',
-        status: 'approved',
-        submitDate: '2024-01-14T09:12:00.000Z',
-        approveDate: '2024-01-14T10:30:00.000Z',
-        requester: { email: 'user@example.com', name: 'Normal User' },
-        approvedBy: 'admin@example.com'
-      },
-      {
-        id: 2,
-        type: 'personal',
-        startDate: '2024-01-20',
-        endDate: '2024-01-20',
-        reason: 'ไปทำธุระส่วนตัว',
-        contact: '081-234-5678',
-        status: 'pending',
-        submitDate: '2024-01-18T14:05:00.000Z',
-        approveDate: null,
-        requester: { email: 'user2@example.com', name: 'Jane Doe' },
-        approvedBy: null
-      },
-      {
-        id: 3,
-        type: 'vacation',
-        startDate: '2024-01-25',
-        endDate: '2024-01-27',
-        reason: 'พักผ่อนกับครอบครัว',
-        contact: '081-234-5678',
-        status: 'rejected',
-        submitDate: '2024-01-20T08:30:00.000Z',
-        approveDate: '2024-01-22T11:45:00.000Z',
-        requester: { email: 'user3@example.com', name: 'John Smith' },
-        approvedBy: 'admin@example.com'
-      }
-    ])
+    const leaveRequests = ref([])
 
     const filteredLeaveRequests = computed(() => {
       if (!selectedStatus.value) {
@@ -203,52 +164,21 @@ export default {
       return leaveRequests.value.filter(request => request.status === selectedStatus.value)
     })
 
-    const submitLeaveRequest = () => {
-      const newRequest = {
-        id: Date.now(),
-        ...leaveForm.value,
-        status: 'pending',
-  submitDate: new Date().toISOString(),
-  approveDate: null,
-        requester: auth.user ? { email: auth.user.email, name: auth.user.name, role: auth.user.role } : { email: 'guest', name: 'Guest' },
-        approvedBy: null
-      }
-      
-      leaveRequests.value.unshift(newRequest)
-      
-      // บันทึกลง localStorage
-      localStorage.setItem('leaveRequests', JSON.stringify(leaveRequests.value))
-      
-      // รีเซ็ตฟอร์ม
-      leaveForm.value = {
-        type: '',
-        startDate: '',
-        endDate: '',
-        reason: '',
-        contact: ''
-      }
-      
+    const submitLeaveRequest = async () => {
+      await LeaveApi.create(leaveForm.value)
+      await loadLeave()
+      leaveForm.value = { type: '', startDate: '', endDate: '', reason: '', contact: '' }
       alert('ส่งคำขอลาเรียบร้อยแล้ว')
     }
 
-    const approveRequest = (requestId) => {
-      const idx = leaveRequests.value.findIndex(r => r.id === requestId)
-      if (idx === -1) return
-      leaveRequests.value[idx].status = 'approved'
-  leaveRequests.value[idx].approveDate = new Date().toISOString()
-      // record approver
-      leaveRequests.value[idx].approvedBy = auth.user ? auth.user.email : 'unknown'
-      localStorage.setItem('leaveRequests', JSON.stringify(leaveRequests.value))
+    const approveRequest = async (requestId) => {
+      await LeaveApi.approve(requestId)
+      await loadLeave()
     }
 
-    const rejectRequest = (requestId) => {
-      const idx = leaveRequests.value.findIndex(r => r.id === requestId)
-      if (idx === -1) return
-      leaveRequests.value[idx].status = 'rejected'
-  leaveRequests.value[idx].approveDate = new Date().toISOString()
-      // record approver
-      leaveRequests.value[idx].approvedBy = auth.user ? auth.user.email : 'unknown'
-      localStorage.setItem('leaveRequests', JSON.stringify(leaveRequests.value))
+    const rejectRequest = async (requestId) => {
+      await LeaveApi.reject(requestId)
+      await loadLeave()
     }
 
     const getTypeIcon = (type) => {
@@ -308,12 +238,26 @@ export default {
       // การกรองจะทำงานผ่าน computed property
     }
 
-    onMounted(() => {
-      // โหลดข้อมูลจาก localStorage
-      const savedRequests = localStorage.getItem('leaveRequests')
-      if (savedRequests) {
-        leaveRequests.value = JSON.parse(savedRequests)
-      }
+    async function loadLeave() {
+      const list = await LeaveApi.list()
+      // map backend fields to UI fields
+      leaveRequests.value = list.map(x => ({
+        id: x._id,
+        type: x.type,
+        startDate: x.startDate,
+        endDate: x.endDate,
+        reason: x.reason,
+        contact: x.contact,
+        status: x.status,
+        submitDate: x.createdAt,
+        approveDate: x.updatedAt,
+        requester: { email: auth.user?.email, name: auth.user?.name },
+        approvedBy: undefined
+      }))
+    }
+
+    onMounted(async () => {
+      await loadLeave()
     })
 
     return {

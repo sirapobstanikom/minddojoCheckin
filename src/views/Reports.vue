@@ -165,12 +165,13 @@
 
 <script>
 import { ref, computed, onMounted } from 'vue'
+import { AttendanceApi, ReportsApi } from '../api/client'
 
 export default {
   name: 'Reports',
   setup() {
     const selectedMonth = ref('')
-    const selectedYear = ref('2024')
+    const selectedYear = ref(String(new Date().getFullYear()))
     
     const months = ref([
       { value: '01', label: 'มกราคม' },
@@ -187,58 +188,7 @@ export default {
       { value: '12', label: 'ธันวาคม' }
     ])
 
-    const dailyReport = ref([
-      {
-        date: '15 ม.ค.',
-        day: 'จันทร์',
-        checkIn: '08:30',
-        checkOut: '17:30',
-        checkInStatus: 'on-time',
-        status: 'present',
-        statusText: 'เข้างานปกติ',
-        workHours: '9 ชม.'
-      },
-      {
-        date: '16 ม.ค.',
-        day: 'อังคาร',
-        checkIn: '08:45',
-        checkOut: '17:15',
-        checkInStatus: 'late',
-        status: 'late',
-        statusText: 'มาสาย',
-        workHours: '8.5 ชม.'
-      },
-      {
-        date: '17 ม.ค.',
-        day: 'พุธ',
-        checkIn: '08:25',
-        checkOut: '17:45',
-        checkInStatus: 'on-time',
-        status: 'present',
-        statusText: 'เข้างานปกติ',
-        workHours: '9.3 ชม.'
-      },
-      {
-        date: '18 ม.ค.',
-        day: 'พฤหัสบดี',
-        checkIn: '-',
-        checkOut: '-',
-        checkInStatus: '',
-        status: 'leave',
-        statusText: 'ลาป่วย',
-        workHours: '0 ชม.'
-      },
-      {
-        date: '19 ม.ค.',
-        day: 'ศุกร์',
-        checkIn: '08:35',
-        checkOut: '17:20',
-        checkInStatus: 'late',
-        status: 'late',
-        statusText: 'มาสาย',
-        workHours: '8.8 ชม.'
-      }
-    ])
+    const dailyReport = ref([])
 
     const summaryData = computed(() => {
       const totalDays = dailyReport.value.length
@@ -261,9 +211,50 @@ export default {
       return Math.round((value / total) * 100)
     }
 
-    const updateReport = () => {
-      // อัพเดทรายงานตามเดือนและปีที่เลือก
-      console.log('อัพเดทรายงาน:', selectedMonth.value, selectedYear.value)
+    const updateReport = async () => {
+      const monthKey = selectedMonth.value && selectedYear.value ? `${selectedYear.value}-${selectedMonth.value}` : ''
+      await Promise.all([loadSummary(monthKey), loadDaily(monthKey)])
+    }
+
+    async function loadSummary(monthKey) {
+      try {
+        await ReportsApi.summary(monthKey)
+        // summaryData is computed from dailyReport, so we don't need to set here
+      } catch {}
+    }
+
+    async function loadDaily(monthKey) {
+      try {
+        const list = await AttendanceApi.list(monthKey)
+        dailyReport.value = list.map(x => {
+          const dateObj = new Date(x.date + 'T00:00:00')
+          const dateDisp = dateObj.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })
+          const dayDisp = dateObj.toLocaleDateString('th-TH', { weekday: 'long' })
+          const checkIn = x.checkInAt ? new Date(x.checkInAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'
+          const checkOut = x.checkOutAt ? new Date(x.checkOutAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'
+          const isLate = (x.lateMinutes || 0) > 0
+          const status = isLate ? 'late' : (x.checkInAt ? 'present' : 'absent')
+          const statusText = status === 'late' ? 'มาสาย' : status === 'present' ? 'เข้างานปกติ' : 'ขาดงาน'
+          let workHours = '0 ชม.'
+          if (x.checkInAt && x.checkOutAt) {
+            const diffMs = new Date(x.checkOutAt) - new Date(x.checkInAt)
+            const hours = Math.max(0, diffMs / 3600000)
+            workHours = `${hours.toFixed(1)} ชม.`
+          }
+          return {
+            date: dateDisp,
+            day: dayDisp,
+            checkIn,
+            checkOut,
+            checkInStatus: isLate ? 'late' : 'on-time',
+            status,
+            statusText,
+            workHours
+          }
+        })
+      } catch {
+        dailyReport.value = []
+      }
     }
 
   const exportReport = () => {
@@ -357,10 +348,10 @@ export default {
       document.body.removeChild(link)
     }
 
-    onMounted(() => {
-      // ตั้งค่าเดือนปัจจุบัน
+    onMounted(async () => {
       const currentMonth = new Date().getMonth() + 1
       selectedMonth.value = currentMonth.toString().padStart(2, '0')
+      await updateReport()
     })
 
     return {
@@ -371,7 +362,8 @@ export default {
       summaryData,
       getPercentage,
       updateReport,
-      exportReport
+      exportReport,
+      exportXLSX
     }
   }
 }
