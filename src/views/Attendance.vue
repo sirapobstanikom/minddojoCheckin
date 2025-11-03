@@ -84,6 +84,7 @@
 
 <script>
 import { ref, onMounted, computed } from 'vue'
+import { AttendanceApi } from '../api/client'
 
 export default {
   name: 'Attendance',
@@ -94,38 +95,7 @@ export default {
     const attendanceStatus = ref(null)
     const selectedMonth = ref('')
     
-    const attendanceRecords = ref([
-      {
-        id: 1,
-        day: 'จันทร์',
-        date: '15 ม.ค. 2567',
-        checkIn: '08:30',
-        checkOut: '17:30',
-        checkInStatus: 'on-time',
-        status: 'present',
-        statusText: 'เข้างานปกติ'
-      },
-      {
-        id: 2,
-        day: 'อังคาร',
-        date: '16 ม.ค. 2567',
-        checkIn: '08:45',
-        checkOut: '17:15',
-        checkInStatus: 'late',
-        status: 'late',
-        statusText: 'มาสาย'
-      },
-      {
-        id: 3,
-        day: 'พุธ',
-        date: '17 ม.ค. 2567',
-        checkIn: '08:25',
-        checkOut: '17:45',
-        checkInStatus: 'on-time',
-        status: 'present',
-        statusText: 'เข้างานปกติ'
-      }
-    ])
+    const attendanceRecords = ref([])
 
     const months = ref([
       { value: '2024-01', label: 'มกราคม 2567' },
@@ -156,92 +126,69 @@ export default {
       })
     }
 
-    const checkIn = () => {
-      const now = new Date()
-      const checkInTime = now.toLocaleTimeString('th-TH', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })
-      
-      const hour = now.getHours()
-      const minute = now.getMinutes()
-      const isLate = hour > 8 || (hour === 8 && minute > 30)
-      
-      isCheckedIn.value = true
-      
-      if (isLate) {
-        attendanceStatus.value = {
-          type: 'warning',
-          icon: '⚠️',
-          message: `เข้างานเวลา ${checkInTime} (มาสาย)`
-        }
-      } else {
-        attendanceStatus.value = {
-          type: 'success',
-          icon: '✅',
-          message: `เข้างานเวลา ${checkInTime} (ตรงเวลา)`
-        }
+    const checkIn = async () => {
+      try {
+        const doc = await AttendanceApi.checkIn()
+        isCheckedIn.value = true
+        const ci = new Date(doc.checkInAt)
+        const checkInTime = ci.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+        const isLate = (doc.lateMinutes || 0) > 0
+        attendanceStatus.value = isLate
+          ? { type: 'warning', icon: '⚠️', message: `เข้างานเวลา ${checkInTime} (มาสาย)` }
+          : { type: 'success', icon: '✅', message: `เข้างานเวลา ${checkInTime} (ตรงเวลา)` }
+        await loadList()
+      } catch (e) {
+        attendanceStatus.value = { type: 'warning', icon: '⚠️', message: e?.message || 'ไม่สามารถเข้างานได้' }
       }
-      
-      // บันทึกข้อมูล
-      const newRecord = {
-        id: Date.now(),
-        day: now.toLocaleDateString('th-TH', { weekday: 'short' }),
-        date: now.toLocaleDateString('th-TH', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric'
-        }),
-        checkIn: checkInTime,
-        checkOut: null,
-        checkInStatus: isLate ? 'late' : 'on-time',
-        status: isLate ? 'late' : 'present',
-        statusText: isLate ? 'มาสาย' : 'เข้างานปกติ'
-      }
-      
-      attendanceRecords.value.unshift(newRecord)
-      
-      // บันทึกลง localStorage
-      localStorage.setItem('attendanceRecords', JSON.stringify(attendanceRecords.value))
     }
 
-    const checkOut = () => {
-      const now = new Date()
-      const checkOutTime = now.toLocaleTimeString('th-TH', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })
-      
-      isCheckedIn.value = false
-      
-      attendanceStatus.value = {
-        type: 'info',
-        icon: '🚪',
-        message: `ออกงานเวลา ${checkOutTime}`
+    const checkOut = async () => {
+      try {
+        const doc = await AttendanceApi.checkOut()
+        isCheckedIn.value = false
+        const co = new Date(doc.checkOutAt)
+        const checkOutTime = co.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+        attendanceStatus.value = { type: 'info', icon: '🚪', message: `ออกงานเวลา ${checkOutTime}` }
+        await loadList()
+      } catch (e) {
+        attendanceStatus.value = { type: 'warning', icon: '⚠️', message: e?.message || 'ไม่สามารถออกงานได้' }
       }
-      
-      // อัพเดทข้อมูลล่าสุด
-      if (attendanceRecords.value.length > 0) {
-        attendanceRecords.value[0].checkOut = checkOutTime
-      }
-      
-      // บันทึกลง localStorage
-      localStorage.setItem('attendanceRecords', JSON.stringify(attendanceRecords.value))
     }
 
     const filterAttendance = () => {
       // การกรองจะทำงานผ่าน computed property
     }
 
-    onMounted(() => {
+    async function loadList(month) {
+      const list = await AttendanceApi.list(month)
+      attendanceRecords.value = list.map(x => {
+        const dateObj = new Date(x.date + 'T00:00:00')
+        const day = dateObj.toLocaleDateString('th-TH', { weekday: 'short' })
+        const dateDisp = dateObj.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+        const checkIn = x.checkInAt ? new Date(x.checkInAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'
+        const checkOut = x.checkOutAt ? new Date(x.checkOutAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : null
+        const isLate = (x.lateMinutes || 0) > 0
+        return {
+          id: x._id,
+          day,
+          date: dateDisp,
+          checkIn,
+          checkOut,
+          checkInStatus: isLate ? 'late' : 'on-time',
+          status: isLate ? 'late' : 'present',
+          statusText: isLate ? 'มาสาย' : 'เข้างานปกติ'
+        }
+      })
+    }
+
+    onMounted(async () => {
       updateTime()
       setInterval(updateTime, 1000)
-      
-      // โหลดข้อมูลจาก localStorage
-      const savedRecords = localStorage.getItem('attendanceRecords')
-      if (savedRecords) {
-        attendanceRecords.value = JSON.parse(savedRecords)
-      }
+      try {
+        const today = await AttendanceApi.today()
+        isCheckedIn.value = !!(today && today.checkInAt && !today.checkOutAt)
+      } catch {}
+      await loadList()
     })
 
     return {

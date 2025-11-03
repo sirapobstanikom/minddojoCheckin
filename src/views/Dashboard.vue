@@ -74,6 +74,8 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import { ReportsApi, AttendanceApi, LeaveApi } from '../api/client'
+import { useAuth } from '../stores/auth'
 
 export default {
   name: 'Dashboard',
@@ -82,40 +84,88 @@ export default {
     const lateCount = ref(0)
     const leaveRequests = ref(0)
     const absentCount = ref(0)
-    
-    const recentActivities = ref([
-      {
-        id: 1,
-        icon: '✅',
-        text: 'เข้างานเวลา 08:30 น.',
-        time: 'วันนี้ 08:30'
-      },
-      {
-        id: 2,
-        icon: '📝',
-        text: 'ส่งคำขอลาวันที่ 15 มกราคม',
-        time: 'เมื่อวาน 16:45'
-      },
-      {
-        id: 3,
-        icon: '⏰',
-        text: 'มาสาย 15 นาที',
-        time: '2 วันที่แล้ว 09:15'
-      }
-    ])
+    const auth = useAuth()
+    const recentActivities = ref([])
 
-    onMounted(() => {
-      // โหลดข้อมูลจาก localStorage หรือ API
-      const savedData = localStorage.getItem('attendanceData')
-      if (savedData) {
-        const data = JSON.parse(savedData)
-        todayAttendance.value = data.todayAttendance || 0
-        lateCount.value = data.lateCount || 0
-        leaveRequests.value = data.leaveRequests || 0
-        absentCount.value = data.absentCount || 0
+    async function loadRecent() {
+      // ล่าสุด 5 จาก attendance + leave
+      const [att, leave] = await Promise.all([
+        AttendanceApi.list(),
+        LeaveApi.list()
+      ])
+      // Map ข้อมูล
+      let activities = []
+      for (const a of att) {
+        if (a.checkInAt)
+          activities.push({
+            date: new Date(a.checkInAt),
+            type: 'checkin',
+            icon: a.lateMinutes && a.lateMinutes > 0 ? '⏰' : '✅',
+            text: `เข้างานเวลา ${new Date(a.checkInAt).toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'})}` + (a.lateMinutes && a.lateMinutes > 0 ? ' (มาสาย)' : '')
+          })
+        if (a.checkOutAt)
+          activities.push({
+            date: new Date(a.checkOutAt),
+            type: 'checkout',
+            icon: '🚪',
+            text: `ออกงานเวลา ${new Date(a.checkOutAt).toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'})}`
+          })
       }
+      for (const l of leave) {
+        activities.push({
+          date: new Date(l.createdAt),
+          type: 'leave',
+          icon: '📝',
+          text:
+            `ส่งคำขอลา (${leaveType(l.type)}) วันที่ ${displayRange(l.startDate, l.endDate)}`
+        })
+      }
+      // จัดเรียงตามเวลา, เอา 5 รายการล่าสุด
+      activities = activities.sort((a, b) => b.date - a.date).slice(0, 5)
+      // สร้าง display time
+      for (const ac of activities) {
+        ac.id = ac.type + ac.date.getTime()
+        ac.time = displayTimeAgo(ac.date)
+      }
+      recentActivities.value = activities
+    }
+    function leaveType(type) {
+      switch (type) {
+        case 'sick': return 'ลาป่วย'
+        case 'personal': return 'ลากิจ'
+        case 'vacation': return 'ลาพักผ่อน'
+        case 'maternity': return 'ลาคลอด'
+        default: return 'อื่นๆ'
+      }
+    }
+    function displayRange(s, e) {
+      const st = new Date(s).toLocaleDateString('th-TH', {day:'numeric',month:'short'})
+      const en = new Date(e).toLocaleDateString('th-TH', {day:'numeric',month:'short'})
+      return st===en?st:`${st}-${en}`
+    }
+    // Simple time-ago formatter
+    function displayTimeAgo(dt) {
+      const now = new Date()
+      const diffMs = now - dt
+      const diffMin = Math.round(diffMs / 60000)
+      const diffHr = Math.round(diffMin / 60)
+      const diffDay = Math.round(diffHr / 24)
+      if (diffMin < 1) return 'เมื่อสักครู่'
+      if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`
+      if (diffHr < 24 && dt.getDate() === now.getDate()) return `วันนี้ ${dt.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}`
+      if (diffDay < 2) return `เมื่อวาน ${dt.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}`
+      return dt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', hour:'2-digit',minute:'2-digit'})
+    }
+    onMounted(async () => {
+      try {
+        const s = await ReportsApi.summary()
+        todayAttendance.value = s.todayAttendance || 0
+        lateCount.value = s.lateCount || 0
+        leaveRequests.value = s.leaveRequests || 0
+        absentCount.value = s.absentCount || 0
+      } catch {}
+      await loadRecent()
     })
-
     return {
       todayAttendance,
       lateCount,
